@@ -12,8 +12,9 @@
  */
 
 import { execSync } from "child_process";
-import { ProcessManager, type Streams } from '../lib';
+import { ProcessManager, Streams } from '../lib';
 import { BattleStream } from "../sim/battle-stream";
+import { RandomPlayerAI } from '../sim/tools/random-player-ai';
 import { RoomGamePlayer, RoomGame } from "./room-game";
 import * as ConfigLoader from './config-loader';
 import type { Tournament } from './tournaments/index';
@@ -472,6 +473,8 @@ export interface RoomBattlePlayerOptions {
 
 export interface RoomBattleOptions {
 	format: string;
+	/** An unrated singles opponent controlled by the server, without a fake user/socket. */
+	cpu?: { name: string, team: string };
 	/**
 	 * length should be equal to the format's playerCount, except in two
 	 * special cases:
@@ -519,6 +522,7 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 	 */
 	readonly allowExtraction: { [k: string]: Set<ID> } = {};
 	readonly stream: Streams.ObjectReadWriteStream<string>;
+	readonly cpu: RandomPlayerAI | null;
 	override readonly timer: RoomBattleTimer;
 	started = false;
 	active = false;
@@ -546,6 +550,11 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 	constructor(room: GameRoom, options: RoomBattleOptions) {
 		super(room);
 		const format = Dex.formats.get(options.format, true);
+		if (options.cpu && (
+			format.gameType !== 'singles' || options.players.length !== 1 || options.rated || options.tour || options.inputLog
+		)) {
+			throw new Error(`CPU battles require one human in an unrated singles game.`);
+		}
 		this.title = format.name;
 		this.options = options;
 		if (!this.title.endsWith(" Battle")) this.title += " Battle";
@@ -559,6 +568,14 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 		this.playerCap = format.playerCount;
 
 		this.stream = PM.createStream();
+		this.cpu = options.cpu ? new RandomPlayerAI(new Streams.ObjectReadWriteStream<string>({
+			write: choice => {
+				if (this.ended) return;
+				this.p2.request.isWait = true;
+				this.p2.request.choice = choice;
+				void this.stream.write(`>p2 ${choice}`);
+			},
+		})) : null;
 
 		let ratedMessage = options.ratedMessage || '';
 		if (this.rated) {
@@ -588,8 +605,14 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 		}
 		for (let i = 0; i < this.playerCap; i++) {
 			const p = options.players[i];
-			const player = this.addPlayer(p?.user || null, p || null);
+			const cpu = i === 1 ? options.cpu : undefined;
+			const player = this.addPlayer(cpu ? cpu.name : p?.user || null, p || null);
 			if (!player) throw new Error(`failed to create player ${i + 1} in ${room.roomid}`);
+			if (cpu) {
+				player.hasTeam = true;
+				player.active = true;
+				void this.stream.write(`>player p2 ${JSON.stringify({ ...cpu, avatar: '102' })}`);
+			}
 		}
 		if (options.inputLog) {
 			let scanIndex = 0;
@@ -665,7 +688,9 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 			return false;
 		}
 
-		const validSlots = this.players.filter(player => !player.id && !player.eliminated).map(player => player.slot);
+		const validSlots = this.players.filter(player => (
+			!player.id && !player.eliminated && !(this.cpu && player.slot === 'p2')
+		)).map(player => player.slot);
 
 		if (slot && !validSlots.includes(slot)) {
 			if (this[slot]?.eliminated) {
@@ -814,8 +839,10 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 				this.requestCount++;
 				player?.sendRoom(`|request|${requestJSON}`);
 				if (!request.update) this.timer.nextRequest(player);
+				if (slot === 'p2' && this.cpu) this.cpu.receiveRequest(request);
 				break;
 			}
+			if (slot === 'p2' && this.cpu && lines[2].startsWith('|error|')) this.cpu.receiveLine(lines[2]);
 			player?.sendRoom(lines[2]);
 			break;
 		}
@@ -1218,13 +1245,13 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 		const delayStart = this.options.delayedStart || !!this.options.inputLog;
 		const users = this.players.map(player => {
 			const user = player.getUser();
-			if (!user && !delayStart) {
+			if (!user && !delayStart && !(this.cpu && player.slot === 'p2')) {
 				throw new Error(`User ${player.id} not found on ${this.roomid} battle creation`);
 			}
 			return user;
 		});
 		if (!delayStart) {
-			Rooms.global.onCreateBattleRoom(users as User[], this.room, { rated: this.rated });
+			Rooms.global.onCreateBattleRoom(users.filter((user): user is User => !!user), this.room, { rated: this.rated });
 			this.started = true;
 		} else if (delayStart === 'multi') {
 			this.room.add(`|uhtml|invites|<div class="broadcast broadcast-blue"><strong>This is a 4-player challenge battle</strong><br />The players will need to add more players before the battle can start.</div>`);
@@ -1277,6 +1304,7 @@ export class RoomBattle extends RoomGame<RoomBattlePlayer> {
 		this.p4 = null!;
 
 		void this.stream.destroy();
+		void this.cpu?.stream.destroy();
 		if (this.active) {
 			Rooms.global.battleCount += -1;
 			this.active = false;

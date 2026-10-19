@@ -38,6 +38,71 @@ Pokémon Showdown is many things:
 
 Pokémon Showdown simulates singles, doubles and triples battles in all the games out so far (Generations 1 through 9).
 
+Chimera fusion mode
+------------------------------------------------------------------------
+
+This fork includes **[Gen 9] Chimera**, a six-fusion draft and CPU battle mode.
+With Node.js **22.18+** (24 LTS recommended):
+
+```sh
+npm ci
+npm run build
+npm start
+```
+
+Open `http://localhost:8000`, choose a username, and enter `/chimera` in chat.
+The draft builder opens in a Showdown page; no separate client checkout is
+required. Select **Start a draft**, build six fusions, then select **Battle the
+CPU**. This opens a **standard Showdown battle room**, with the same animated
+battlefield, sprites, team preview, move buttons, switching controls and battle
+log as Random Battle. Moves and switches use the real Showdown simulator,
+including abilities, items, status, hazards, accuracy and PP.
+
+Rules:
+
+* Six rounds: draw three parents and choose two per fusion; **two whole-draw
+  rerolls total**, shared across the draft.
+* Twelve distinct parent **forms** per team. Regional/alternate forms count
+  separately (Samurott and Samurott-Hisui may both be used). The CPU has its own
+  independent parent pool and follows the same team-building rules.
+* Fully evolved Gen 9 species with supported Showdown random-battle sets,
+  including legendary and Paradox Pokémon. Unavailable species, battle-only
+  transformations, and forms requiring specific items or moves are excluded.
+* Each of the six stats comes from exactly one parent: three from A, three from
+  B. Choose one type from each parent; matching types produce a monotype fusion.
+* Choose any normal/hidden ability from either parent, one of the two generated
+  parent items, and one to four distinct moves from their generated four-move
+  sets. Parent sets are generated without Tera-only roles.
+* Level 100, Serious nature, 31 IVs and 85 EVs in every stat. No Terastallization,
+  Mega Evolution, Z-Moves or Dynamax. No additional competitive bans.
+
+Fusions use the first parent's standard sprite, not custom fusion artwork.
+The CPU uses Showdown's existing random-player AI and answers normal simulator
+requests, including forced switches and revival. This is not a competitive
+search AI. After the battle, use **Return to Chimera builder / rematch** and then
+**Rematch with this team** for another CPU battle (not the client's regular
+human challenge/rematch button). Human-vs-human matchmaking is not implemented.
+
+Drafts are in memory and are cleared on disconnect/server restart. Native
+battle rooms follow Showdown's normal reconnect, forfeit, timer and cleanup
+behavior. Finish or forfeit a battle before starting another draft.
+Serialized fusion nicknames beginning with `C` encode the parents, generated-set
+seed, stat split and type choices so packed teams survive serialization. Native
+battles display blended names instead (Kyurem + Infernape becomes **Kyrnape**),
+and announce the full pair on switch-in. Names blend a first-half stem from
+Parent A (smoothing adjacent vowels) with the last half of Parent B's base name,
+omitting form suffixes.
+Do not rename the serialized recipes; they depend on this fork's parent-pool/set-data version.
+
+Focused validation (using the same Node.js version):
+
+```sh
+npm run tsc
+npx mocha --no-config --exit --timeout 15000 test/main.js \
+  test/sim/misc/chimera.js test/server/chimera-battle.js \
+  test/server/chat-plugins/chimera.js
+```
+
 
 Documentation quick links
 ------------------------------------------------------------------------

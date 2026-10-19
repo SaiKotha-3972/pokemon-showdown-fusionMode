@@ -17,7 +17,58 @@ New sections will be added to the bottom of the specified column.
 The column value will be ignored for repeat sections.
 */
 
+import { chimeraSpecies, decodeChimera, getChimeraName, validateChimeraSet, validateChimeraTeam } from '../sim/chimera';
+
 export const Formats: import('../sim/dex-formats').FormatList = [
+
+	{
+		section: "Chimera",
+	},
+	{
+		name: "[Gen 9] Chimera",
+		desc: `Draft six fusions and battle a CPU. Use <code>/chimera</code> to open the builder.`,
+		mod: 'gen9',
+		searchShow: false,
+		challengeShow: false,
+		rated: false,
+		ruleset: [
+			'Team Preview', 'Cancel Mod', 'Terastal Clause', 'Dynamax Clause', 'Endless Battle Clause',
+			'Min Team Size = 6', 'Max Team Size = 6', 'Default Level = 100',
+		],
+		onValidateSet(set) {
+			return validateChimeraSet(set);
+		},
+		onValidateTeam(team) {
+			return validateChimeraTeam(team);
+		},
+		getPokemonName(set) {
+			const recipe = decodeChimera(set.name);
+			return recipe ? getChimeraName(recipe) : set.name;
+		},
+		onSwitchIn(pokemon) {
+			const visible = pokemon.illusion || pokemon;
+			const recipe = decodeChimera(visible.set.name);
+			if (recipe) this.add('-message', `${visible.name}: ${recipe.parents.map(parent => parent.name).join(' + ')}`);
+		},
+		onModifySpecies(species, target, source, effect) {
+			if (!target || (effect && ['transform', 'imposter'].includes(effect.id))) return;
+			const recipe = decodeChimera(target.set.name);
+			if (!recipe) return;
+			const fusion = chimeraSpecies(recipe);
+			return { ...species, baseStats: fusion.baseStats, bst: fusion.bst, types: fusion.types, weightkg: fusion.weightkg };
+		},
+		onBegin() {
+			for (const pokemon of this.getAllPokemon()) pokemon.baseSpecies = pokemon.species;
+		},
+	},
+	{
+		name: "[Gen 9] Chimera Parents",
+		mod: 'gen9',
+		team: 'random',
+		searchShow: false,
+		challengeShow: false,
+		ruleset: ['Obtainable', 'Terastal Clause'],
+	},
 
 	// S/V Singles
 	///////////////////////////////////////////////////////////////////
